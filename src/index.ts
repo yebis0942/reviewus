@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+type ReviewReason = "review-requested" | "updated";
+
 interface PullRequest {
   repository: {
     nameWithOwner: string;
@@ -11,11 +13,43 @@ interface PullRequest {
   };
   createdAt: string;
   updatedAt: string;
+  reason: ReviewReason;
+  commits?: {
+    nodes: Array<{
+      commit: {
+        committedDate: string;
+      };
+    }>;
+  };
+  comments?: {
+    nodes: Array<{
+      author: {
+        login: string;
+      };
+      createdAt: string;
+    }>;
+  };
+  reviews?: {
+    nodes: Array<{
+      author: {
+        login: string;
+      };
+      submittedAt: string;
+    }>;
+  };
 }
 
 interface GraphQLResponse {
   data: {
-    search: {
+    viewer: {
+      login: string;
+    };
+    reviewRequested: {
+      edges: Array<{
+        node: PullRequest;
+      }>;
+    };
+    interacted: {
       edges: Array<{
         node: PullRequest;
       }>;
@@ -43,7 +77,10 @@ let isLoading = false;
 async function fetchReviewRequests(): Promise<PullRequest[]> {
   const query = `
     query {
-      search(query: "type:pr state:open review-requested:@me draft:false", type: ISSUE, first: 100) {
+      viewer {
+        login
+      }
+      reviewRequested: search(query: "type:pr state:open review-requested:@me draft:false", type: ISSUE, first: 100) {
         edges {
           node {
             ... on PullRequest {
@@ -57,6 +94,47 @@ async function fetchReviewRequests(): Promise<PullRequest[]> {
               }
               createdAt
               updatedAt
+            }
+          }
+        }
+      }
+      interacted: search(query: "type:pr state:open involves:@me -author:@me draft:false", type: ISSUE, first: 100) {
+        edges {
+          node {
+            ... on PullRequest {
+              repository {
+                nameWithOwner
+              }
+              title
+              url
+              author {
+                login
+              }
+              createdAt
+              updatedAt
+              commits(last: 1) {
+                nodes {
+                  commit {
+                    committedDate
+                  }
+                }
+              }
+              comments(last: 100) {
+                nodes {
+                  author {
+                    login
+                  }
+                  createdAt
+                }
+              }
+              reviews(last: 100) {
+                nodes {
+                  author {
+                    login
+                  }
+                  submittedAt
+                }
+              }
             }
           }
         }
@@ -78,7 +156,68 @@ async function fetchReviewRequests(): Promise<PullRequest[]> {
   }
 
   const response: GraphQLResponse = JSON.parse(output);
-  return response.data.search.edges.map((edge) => edge.node);
+  const viewerLogin = response.data.viewer.login;
+
+  // Process review-requested PRs
+  const reviewRequestedPrs = response.data.reviewRequested.edges.map(
+    (edge) =>
+      ({
+        ...edge.node,
+        reason: "review-requested",
+      }) satisfies PullRequest,
+  );
+
+  // Process interacted PRs (commented or reviewed)
+  const interactedPrs = response.data.interacted.edges.map((edge) => edge.node);
+
+  // Filter PRs with new commits since last comment/review
+  const filteredInteracted: PullRequest[] = [];
+  for (const pr of interactedPrs) {
+    // Get latest commit date
+    const latestCommitDate = pr.commits?.nodes[0]?.commit.committedDate;
+    if (!latestCommitDate) continue;
+
+    // Get latest interaction date (comment or review)
+    const latestInteractionDate = (() => {
+      const myComments =
+        pr.comments?.nodes.filter((c) => c.author.login === viewerLogin) || [];
+      const latestCommentDate = myComments.at(-1)?.createdAt ?? null;
+
+      const myReviews =
+        pr.reviews?.nodes.filter((r) => r.author.login === viewerLogin) || [];
+      const latestReviewDate = myReviews.at(-1)?.submittedAt ?? null;
+
+      const dates = [latestCommentDate, latestReviewDate].filter(
+        (d) => d !== null,
+      );
+      if (dates.length === 0) return null;
+
+      return dates.reduce((latest, current) =>
+        current > latest ? current : latest,
+      );
+    })();
+
+    if (latestInteractionDate === null) continue;
+
+    // Check if there are new commits since last interaction
+    if (latestCommitDate > latestInteractionDate) {
+      filteredInteracted.push({
+        ...pr,
+        reason: "updated",
+      });
+    }
+  }
+
+  // Merge all PRs, deduplicating by URL (review-requested takes priority)
+  const finalMap = new Map<string, PullRequest>();
+  for (const pr of filteredInteracted) {
+    finalMap.set(pr.url, pr);
+  }
+  for (const pr of reviewRequestedPrs) {
+    finalMap.set(pr.url, pr);
+  }
+
+  return Array.from(finalMap.values());
 }
 
 function formatDateTime(isoDate: string): string {
