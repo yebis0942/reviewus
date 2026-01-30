@@ -58,13 +58,13 @@ interface GraphQLResponse {
 }
 
 const ANSI = {
-  cyan: '\x1b[36m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  dim: '\x1b[2m',
-  reset: '\x1b[0m',
-  reverse: '\x1b[7m',
-  green: '\x1b[32m',
+  cyan: "\x1b[36m",
+  yellow: "\x1b[33m",
+  blue: "\x1b[34m",
+  dim: "\x1b[2m",
+  reset: "\x1b[0m",
+  reverse: "\x1b[7m",
+  green: "\x1b[32m",
 };
 
 // State
@@ -142,9 +142,9 @@ async function fetchReviewRequests(): Promise<PullRequest[]> {
     }
   `;
 
-  const proc = Bun.spawn(['gh', 'api', 'graphql', '-f', `query=${query}`], {
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const proc = Bun.spawn(["gh", "api", "graphql", "-f", `query=${query}`], {
+    stdout: "pipe",
+    stderr: "pipe",
   });
 
   const output = await new Response(proc.stdout).text();
@@ -223,16 +223,16 @@ async function fetchReviewRequests(): Promise<PullRequest[]> {
 function formatDateTime(isoDate: string): string {
   const date = new Date(isoDate);
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 function getSortedAndGroupedPrs(): { repo: string; prs: PullRequest[] }[] {
   const sorted = [...prs].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
 
   const grouped = new Map<string, PullRequest[]>();
@@ -256,11 +256,11 @@ function render(): void {
   const now = new Date();
   const timestamp = formatDateTime(now.toISOString());
 
-  let output = `\n=== PRs Awaiting Review (${prs.length}) === ${timestamp}\n`;
+  let output = `\n=== PRs To Review (${prs.length}) === ${timestamp}\n`;
   output += `${ANSI.dim}↑/k:up ↓/j:down Enter:open p:mark o:open marked r:refresh q:quit${ANSI.reset}\n`;
 
   if (prs.length === 0) {
-    output += '\nNo review requests\n';
+    output += "\nNo PRs to review\n";
   } else {
     const groups = getSortedAndGroupedPrs();
     let globalIndex = 0;
@@ -270,11 +270,16 @@ function render(): void {
       for (const pr of repoPrs) {
         const isSelected = globalIndex === cursorIndex;
         const isMarked = markedUrls.has(pr.url);
-        const marker = isMarked ? `${ANSI.green}●${ANSI.reset} ` : '  ';
-        const selector = isSelected ? `${ANSI.reverse}` : '';
-        const selectorEnd = isSelected ? `${ANSI.reset}` : '';
+        const marker = isMarked ? `${ANSI.green}●${ANSI.reset} ` : "  ";
+        const selector = isSelected ? `${ANSI.reverse}` : "";
+        const selectorEnd = isSelected ? `${ANSI.reset}` : "";
 
-        output += `${marker}${selector}${pr.title}${selectorEnd}\n`;
+        const reasonTag =
+          pr.reason === "review-requested"
+            ? `${ANSI.yellow}[review requested]${ANSI.reset}`
+            : `${ANSI.dim}[new commits]${ANSI.reset}`;
+
+        output += `${marker}${selector}${pr.title}${selectorEnd} ${reasonTag}\n`;
         output += `    ${ANSI.dim}@${pr.author.login} | ${formatDateTime(pr.updatedAt)}${ANSI.reset}\n`;
         output += `    ${ANSI.blue}${pr.url}${ANSI.reset}\n`;
         globalIndex++;
@@ -282,14 +287,14 @@ function render(): void {
     }
   }
 
-  output += '\n';
+  output += "\n";
   if (isLoading) {
     output += `${ANSI.yellow}● Loading...${ANSI.reset}\n`;
   } else if (lastFetchTime) {
     const nextFetch = new Date(lastFetchTime.getTime() + 5 * 60 * 1000);
     output += `Next auto-refresh: ${formatDateTime(nextFetch.toISOString())}\n`;
   } else {
-    output += '\n'; // 初期状態でも1行確保してレイアウトを安定させる
+    output += "\n"; // 初期状態でも1行確保してレイアウトを安定させる
   }
 
   console.clear();
@@ -297,9 +302,9 @@ function render(): void {
 }
 
 async function openUrl(url: string): Promise<void> {
-  const proc = Bun.spawn(['open', url], {
-    stdout: 'ignore',
-    stderr: 'ignore',
+  const proc = Bun.spawn(["open", url], {
+    stdout: "ignore",
+    stderr: "ignore",
   });
   await proc.exited;
 }
@@ -308,26 +313,26 @@ async function handleKeypress(key: string): Promise<boolean> {
   const flatList = getFlatPrList();
 
   switch (key) {
-    case 'j':
-    case '\x1b[B': // Down arrow
+    case "j":
+    case "\x1b[B": // Down arrow
       if (flatList.length > 0) {
         cursorIndex = Math.min(cursorIndex + 1, flatList.length - 1);
         render();
       }
       break;
-    case 'k':
-    case '\x1b[A': // Up arrow
+    case "k":
+    case "\x1b[A": // Up arrow
       if (flatList.length > 0) {
         cursorIndex = Math.max(cursorIndex - 1, 0);
         render();
       }
       break;
-    case '\r': // Enter
+    case "\r": // Enter
       if (flatList.length > 0 && cursorIndex < flatList.length) {
         await openUrl(flatList[cursorIndex].url);
       }
       break;
-    case 'p':
+    case "p":
       if (flatList.length > 0 && cursorIndex < flatList.length) {
         const url = flatList[cursorIndex].url;
         if (markedUrls.has(url)) {
@@ -339,18 +344,18 @@ async function handleKeypress(key: string): Promise<boolean> {
         render();
       }
       break;
-    case 'o':
+    case "o":
       for (const url of markedUrls) {
         await openUrl(url);
       }
       markedUrls.clear();
       render();
       break;
-    case 'r':
+    case "r":
       await refreshData();
       break;
-    case 'q':
-    case '\x03': // Ctrl+C
+    case "q":
+    case "\x03": // Ctrl+C
       return false;
   }
   return true;
@@ -367,7 +372,7 @@ async function refreshData(): Promise<void> {
       cursorIndex = Math.max(0, flatList.length - 1);
     }
   } catch (error) {
-    console.error('An error occurred:', error);
+    console.error("An error occurred:", error);
   } finally {
     isLoading = false;
     render();
@@ -375,7 +380,7 @@ async function refreshData(): Promise<void> {
 }
 
 async function main() {
-  console.log('Starting PR Review Watcher...\n');
+  console.log("Starting PR Review Watcher...\n");
 
   // Initial fetch
   await refreshData();
@@ -383,19 +388,19 @@ async function main() {
   // Set up stdin for raw mode
   process.stdin.setRawMode(true);
   process.stdin.resume();
-  process.stdin.setEncoding('utf8');
+  process.stdin.setEncoding("utf8");
 
   // Set up refresh interval
   const refreshInterval = setInterval(refreshData, 5 * 60 * 1000);
 
   // Handle keypress
-  process.stdin.on('data', async (key: string) => {
+  process.stdin.on("data", async (key: string) => {
     const shouldContinue = await handleKeypress(key);
     if (!shouldContinue) {
       clearInterval(refreshInterval);
       process.stdin.setRawMode(false);
       console.clear();
-      console.log('PR Review Watcher exited.');
+      console.log("PR Review Watcher exited.");
       process.exit(0);
     }
   });
